@@ -1,4 +1,4 @@
-// Copyright 2018 Insite SAS 
+// Copyright 2018 Insite SAS
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@
 #include "cron.h"
 #include "jobs.h"
 
-
 static struct
 {
   unsigned char running;
@@ -32,19 +31,19 @@ static struct
 } state = {
     .running = 0,
     .handle = NULL,
-    .seconds_until_next_execution = -1
-  };
+    .seconds_until_next_execution = -1};
 
-cron_job *cron_job_create(const char *schedule, cron_job_callback callback, void *data)
+cron_job *cron_job_create(const char *schedule, cron_job_callback callback, void *data, bool loop)
 {
-  cron_job_list_init();// CALL THIS ON ANY CREATE
+  cron_job_list_init(); // CALL THIS ON ANY CREATE
   cron_job *job = calloc(sizeof(cron_job), 1);
   if (job == NULL)
     goto end;
   job->callback = callback;
   job->data = data;
   job->id = -1;
-  job->load=NULL;
+  job->load = NULL;
+  job->loop = loop;
   cron_job_load_expression(job, schedule);
   cron_job_schedule(job);
   goto end;
@@ -55,8 +54,9 @@ end:
 
 int cron_job_destroy(cron_job *job)
 {
-  int ret=0;
-  if (job == NULL) {
+  int ret = 0;
+  if (job == NULL)
+  {
     ret = -1;
     goto end;
   }
@@ -71,7 +71,7 @@ int cron_job_clear_all()
   // REFACTOR THIS!
   while (cron_job_list_first())
   {
-   cron_job_destroy(cron_job_list_first()->job);
+    cron_job_destroy(cron_job_list_first()->job);
   }
   cron_job_list_reset_id();
   return 0;
@@ -87,8 +87,9 @@ int cron_stop()
   state.running = 0;
   xHandle = state.handle;
   state.handle = NULL;
-  if (xHandle != NULL) {
-    
+  if (xHandle != NULL)
+  {
+
     vTaskDelete(xHandle);
   }
   return 0;
@@ -118,7 +119,6 @@ int cron_start()
   state.running = 1;
   return 0;
 }
-
 
 int cron_job_schedule(cron_job *job)
 {
@@ -160,8 +160,7 @@ int cron_job_unschedule(cron_job *job)
   return ret;
 }
 
-
-int cron_job_load_expression(cron_job *job, const char * schedule)
+int cron_job_load_expression(cron_job *job, const char *schedule)
 {
   const char *error = NULL;
 
@@ -192,23 +191,21 @@ time_t cron_job_seconds_until_next_execution()
   return state.seconds_until_next_execution;
 }
 
+// CRON TASKS
 
-
-// CRON TASKS 
-
-
-void cron_schedule_job_launcher(void * args){
-  if (args==NULL) {
+void cron_schedule_job_launcher(void *args)
+{
+  if (args == NULL)
+  {
     goto end;
   }
-  cron_job * job = (cron_job *) args;  
+  cron_job *job = (cron_job *)args;
   job->callback(job);
   goto end;
 
-
-  end:
-    vTaskDelete(NULL);
-    return;
+end:
+  vTaskDelete(NULL);
+  return;
 }
 
 void cron_schedule_task(void *args)
@@ -227,24 +224,34 @@ void cron_schedule_task(void *args)
   {
     state.running = 1;
     time(&now);
-    job = cron_job_list_first()->job;
+    if (cron_job_list_first() != NULL)
+    {
+      job = cron_job_list_first()->job;
+    }
+    else
+    {
+      break;
+    }
     if (job == NULL)
     {
-      break;// THIS IS IT!!! THIS WILL 
+      break; // THIS IS IT!!! THIS WILL
     }
     if (now >= job->next_execution)
     {
       /* Create the task, IT WILL KILL ITSELF AFTER THE JOB IS DONE. */
       xTaskCreatePinnedToCore(
-      cron_schedule_job_launcher,   /* Function that implements the task. */
-      "cron_schedule_job_launcher", /* Text name for the task. */
-      4096,                 /* Stack size in BYTES, not bytes. */
-      (void *)job,          /* Job is passed into the task. */
-      tskIDLE_PRIORITY + 2, /* Priority at which the task is created. */
-      (NULL),               /* No need for the handle */
-      tskNO_AFFINITY);      /* No specific core */          
-      cron_job_list_remove(job->id); // There is mutex in there that can mess with our timing, but i am not sure if we should move this to the new task. 
-      cron_job_schedule(job); // There is mutex in there that can mess with our timing, but i am not sure if we should move this to the new task. 
+          cron_schedule_job_launcher,   /* Function that implements the task. */
+          "cron_schedule_job_launcher", /* Text name for the task. */
+          4096,                         /* Stack size in BYTES, not bytes. */
+          (void *)job,                  /* Job is passed into the task. */
+          tskIDLE_PRIORITY + 2,         /* Priority at which the task is created. */
+          (NULL),                       /* No need for the handle */
+          tskNO_AFFINITY);              /* No specific core */
+      cron_job_list_remove(job->id);    // There is mutex in there that can mess with our timing, but i am not sure if we should move this to the new task.
+      if (job->loop)                    // if cron expression has been option loop so nex calculate to next job
+      {
+        cron_job_schedule(job); // There is mutex in there that can mess with our timing, but i am not sure if we should move this to the new task.
+      }
     }
     else
     {
@@ -259,5 +266,3 @@ void cron_schedule_task(void *args)
   cron_stop();
   return;
 }
-
-
